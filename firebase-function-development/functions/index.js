@@ -340,6 +340,37 @@ exports.iDNA_Delete_MyApplication = functions.database.ref(PATH_ROOT_IDNA + '/'+
 	return true;
 });
 
+
+/*
+ function : ลบ Post ของ My Application
+*/
+exports.iDNA_Delete_Post_MyApplication = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_IDNA + '/{uid}/my_applications/{app_id}/posts/{post_id}/').onDelete(event => {
+	var options = {
+	  uri: API_URL_IDNA + END_POINT_IDNA + PATH_DELETE_POST_MY_APPLICATION,
+	  method: 'POST',
+	  headers: headers,
+	  json: {
+	  	"post_id"    : event.params.post_id
+	  }
+	};
+
+	request(options, function (error, response, body) {
+		if (error == null){			
+			if (body.result) {
+				console.log(body);
+				return true;
+			}else{
+				console.log(body.message);
+				return false;
+			}
+		}else{
+			return false;
+		}
+	});
+	
+	return true;
+});
+
 /*
  function : ลบ Group Chat
 */
