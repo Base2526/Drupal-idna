@@ -74,12 +74,13 @@ function klovers_file_save_data($uid, $data, $destination = NULL, $replace = FIL
 
 function ___test()
 {
-	return "test___";
+
+	return "test___" . CONFIG_PAGES_TYPE;
 }
 
 // https://firebase.google.com/docs/cloud-messaging/http-server-ref
 // https://github.com/adocwang/mipush/blob/f604c5353d73720282094e2f21b325a5c029069a/xmpush/DevTools.php ส่งแยกตาม package name
-function basic_send_push_notification($token, $title="KLOVERS.ORG", $message="MESSAGE", $sound, $vibrate = 0, $badge=0)
+function send_push_notification($token, $title="KLOVERS.ORG", $message="MESSAGE", $data=array(), $badge=0, $sound = 0, $vibrate = 0)
 {
 
   //The device token.
@@ -122,7 +123,7 @@ function basic_send_push_notification($token, $title="KLOVERS.ORG", $message="ME
    /*
 https://github.com/adocwang/mipush/blob/f604c5353d73720282094e2f21b325a5c029069a/xmpush/DevTools.php
    */
-  $arrayToSend = array('to' => $token, 'notification' => $notification,'priority'=>'high');
+  $arrayToSend = array('to' => $token, 'notification' => $notification, 'priority'=>'high', 'data'=>$data);
 
   /*
 $fields = array('registration_id' => $regId, 'restricted_package_name' => $packageName);
@@ -134,7 +135,9 @@ $fields = array('registration_id' => $regId, 'restricted_package_name' => $packa
   //Setup headers:
   $headers = array();
   $headers[] = 'Content-Type: application/json';
-  $headers[] = 'Authorization: key=AIzaSyDfCPJJNM0SusVYNCzo76e9S4esYkqVjzA'; // key here
+  $headers[] = 'Authorization: key=' . CLOUD_MESSAGEING_KEY; // key here
+
+  // AIzaSyCZnca6t5Vda8zyRbh8v76geacJe9-9Hr4
 
   //Setup curl, add headers and post parameters.
   curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");                                           
@@ -307,6 +310,96 @@ function dec_enc($action, $string) {
     return $output;
 }
 
+
+/*
+  เป้น function ทีใช้สำหรับ extract frame video ของ ffmpeg 
+*/
+function ffmpeg_thumbnail_extract_frame($file, \FFMpeg\Coordinate\TimeCode $at = NULL) {
+
+  if (!is_object($file) && !is_array($file)) {
+    throw new InvalidArgumentException(t('The $file argument must be an object and an array.'));
+  }
+  $file = (array) $file;
+  $file_default_scheme = file_default_scheme();
+  $thumbnail_dir = file_default_scheme() . '://' . variable_get('ffmpeg_video_thumbnail_dir', 'thumbnails');
+  $thumbnail_filename = hash('md5', $file['uri']) . '-' . ($at ? str_replace(array(':','.'), '',(string) $at) : 'default') . '.png';
+  $thumbnail_uri =  $thumbnail_dir . '/' .$thumbnail_filename;
+  // Check if the thumbnail already exists.
+  if (file_exists($thumbnail_uri)) {
+    // Check if the existing thumbnail is older than the file itself.
+    if (filemtime($file['uri']) <= filemtime($thumbnail_uri)) {
+      // The existing thumbnail can be used, nothing to do.
+      return $thumbnail_uri;
+    }
+    else {
+      // Delete the existing but out-of-date thumbnail.
+      file_unmanaged_delete($thumbnail_uri);
+      // Clears cached versions of a the existing thumbnail file in all image styles.
+      image_path_flush($thumbnail_uri);
+    }
+  }
+
+  $scheme = file_uri_scheme($file['uri']);
+  $wrappers = file_get_stream_wrappers(STREAM_WRAPPERS_LOCAL);
+  // Check if the source is a remote file.
+  if (empty($wrappers[$scheme]) || !empty($wrappers[$scheme]['remote'])) {
+    // Use the URL of a remote file.
+    $file['uri'] = file_create_url($file['uri']);
+    if (!parse_url($file['uri'], PHP_URL_SCHEME)) {
+      global $is_https;
+      $file['uri'] = ($is_https ? 'https:' : 'http:') . $file['uri'];
+    }
+  }
+
+  try {
+    $ffmpeg = php_ffmpeg();
+    // $video = $ffmpeg->open($file['uri']);  จะไม่ทำงาน เราต้อง ใช้ path จิง ex. 'sites/default/files/video_001.mp4' โดยข้างหน้า path จะไม่มี '/'
+     $video = $ffmpeg->open(substr(file_create_url($file['uri']), strlen($GLOBALS['base_url'] . '/')));
+
+    $video_stream = $video->getStreams()->videos()->first();
+    if (empty($at)) {
+      if ($video_stream->has('duration')) {
+        $duration = $video_stream->get('duration');
+        $at = FFMpeg\Coordinate\TimeCode::fromSeconds($duration / 2);
+      }
+      else {
+        $at = FFMpeg\Coordinate\TimeCode::fromSeconds(1);
+      }
+    }
+    if (!file_prepare_directory($thumbnail_dir, FILE_CREATE_DIRECTORY)) {
+      throw new RuntimeException(t('Unable to create @directory.', array('@directory' => $thumbnail_dir)));
+    }
+    // Check if the destination is a remote file.
+    if (empty($wrappers[$file_default_scheme]) || !empty($wrappers[$file_default_scheme]['remote'])) {
+      // Use a temporary local file as destination.
+      $temporary_thumbnail_uri = str_replace("$scheme://", 'temporary://', $thumbnail_uri);
+      $temporary_thumbnail_dir = dirname($temporary_thumbnail_uri);
+      file_prepare_directory($temporary_thumbnail_dir, FILE_CREATE_DIRECTORY);
+      $thumbnail_realpath = drupal_realpath($temporary_thumbnail_uri);
+    }
+    else {
+      $thumbnail_realpath = drupal_realpath($thumbnail_uri);
+    }
+    $video
+      ->frame($at)
+      ->save($thumbnail_realpath);
+    if (isset($temporary_thumbnail_uri)) {
+      // Copy the temporary local file to the final destination.
+      file_unmanaged_copy($temporary_thumbnail_uri, $thumbnail_uri);
+      file_unmanaged_delete($temporary_thumbnail_uri);
+    }
+  }
+  catch (Exception $e) {
+    throw new RuntimeException(t('Error while extracting frame from @file, check php_ffmpeg log.', array('@file' => $file['uri'])), 0, $e);
+  }
+
+  return $thumbnail_uri;
+}
+
+function IsNullOrEmptyString($text){
+
+    return (!isset($text) || trim($text)==='');
+}
 
 
 ?>
