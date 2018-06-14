@@ -1286,6 +1286,8 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 
 		// console.log("outgoing_call flag" + flag );
 
+		return true;
+		/*
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
@@ -1312,6 +1314,7 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 			}
 		}
 		return false
+		*/
 	}
 });
 
@@ -1355,6 +1358,9 @@ exports.incoming_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 		โดยเงือนว่า previous field device_id =="" && current field device_id != "" แค่นี้น่าจะได้
 		*/
 
+		return true;
+
+		/*
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
@@ -1366,6 +1372,7 @@ exports.incoming_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 		}
 
 		return true;
+		*/
 	}
 });
 

@@ -3697,7 +3697,7 @@ function tw_voice_incoming(){
 }
 
 
-function get_caller($room_name){
+function get_caller2($room_name){
   $query    = new EntityFieldQuery();
   $entities = $query->entityCondition('entity_type', 'field_collection_item')
               ->entityCondition('bundle', 'field_twilio_video_members')
@@ -3724,6 +3724,72 @@ function get_caller($room_name){
 
     return array('hostentity_id'=>$hostentity_id, 'uuid'=>$uuid, 'caller_uid'=>$caller_uid, 'caller_name'=>$caller_name, 'has_video'=>$has_video);
   }
+  return;
+}
+
+function get_caller($in_progress_data_item){
+  /*
+  $query    = new EntityFieldQuery();
+  $entities = $query->entityCondition('entity_type', 'field_collection_item')
+              ->entityCondition('bundle', 'field_twilio_video_members')
+              ->fieldCondition('field_twv_members_type', 'value', 'caller', '=')
+              ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
+              ->execute();
+
+  // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
+  if (!empty($entities['field_collection_item'])) {
+    $item_id = array_keys($entities['field_collection_item'])[0];
+    $data_item = field_collection_item_load($item_id);
+
+    $hostentity_id = $data_item->hostEntity()->item_id;
+
+    $host_data_item = field_collection_item_load($hostentity_id);
+    $uuid  = $host_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
+    $has_video = $host_data_item->field_twilio_ic_has_video[LANGUAGE_NONE][0]['value'];
+
+    $caller_uid = $data_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
+
+    $caller_profile = profile2_by_uid_load($caller_uid, 'main');
+    $caller_name    = $caller_profile->field_profile_display_name[LANGUAGE_NONE][0]['value'];
+
+
+    return array('hostentity_id'=>$hostentity_id, 'uuid'=>$uuid, 'caller_uid'=>$caller_uid, 'caller_name'=>$caller_name, 'has_video'=>$has_video);
+  }
+  */
+  if(isset($in_progress_data_item->field_twilio_video_members[LANGUAGE_NONE])){
+    foreach ($in_progress_data_item->field_twilio_video_members[LANGUAGE_NONE] as $members_k => $members_v) {
+      $twilio_video_members_item = field_collection_item_load($members_v['value']);
+
+      $item_member_load_type = $twilio_video_members_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
+
+      // switch ($item_member_load_type) {
+      switch ($item_member_load_type) {
+        case 'caller':{
+            $hostentity_id = $twilio_video_members_item->hostEntity()->item_id;
+
+            $host_data_item = field_collection_item_load($hostentity_id);
+
+            $uuid  = $host_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
+            $has_video = $host_data_item->field_twilio_ic_has_video[LANGUAGE_NONE][0]['value'];
+
+            $caller_uid = $twilio_video_members_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
+
+            $caller_profile = profile2_by_uid_load($caller_uid, 'main');
+            $caller_name    = $caller_profile->field_profile_display_name[LANGUAGE_NONE][0]['value'];
+
+
+            return array('hostentity_id'=>$hostentity_id, 'uuid'=>$uuid, 'caller_uid'=>$caller_uid, 'caller_name'=>$caller_name, 'has_video'=>$has_video);
+          }
+          break;
+        
+        default:
+          # code...
+          break;
+      }
+    }
+  }
+
+
   return;
 }
 
@@ -3755,8 +3821,14 @@ function hook_group_rooms(){
           break;
 
           case 'track-added': {
-            $room_name = $_REQUEST['RoomName'];
-            $room_sid  = $_REQUEST['RoomSid'];
+
+            watchdog(TAG, 'hook_group_rooms > track-added : %item_id', array('%item_id'=> serialize($_REQUEST)), WATCHDOG_INFO);
+
+            $room_status  = $_REQUEST['RoomStatus'];
+
+            $room_name    = $_REQUEST['RoomName'];
+            $room_sid     = $_REQUEST['RoomSid'];
+            $status_callback     =  $_REQUEST['StatusCallbackEvent'];
 
             $in_progress_query    = new EntityFieldQuery();
             $in_progress_entities = $in_progress_query->entityCondition('entity_type', 'field_collection_item')
@@ -3768,9 +3840,13 @@ function hook_group_rooms(){
               $in_progress_item_id = array_keys($in_progress_entities['field_collection_item'])[0];
               $in_progress_data_item = field_collection_item_load($in_progress_item_id);
 
+
+              $in_progress_data_item_uuid = $in_progress_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
+
               $in_progress_wrapper = entity_metadata_wrapper('field_collection_item', $in_progress_data_item);
               $in_progress_wrapper->field_twilio_room_sid->set($room_sid);
-              $in_progress_wrapper->field_twilio_room_status->set($_REQUEST['RoomStatus']);
+              $in_progress_wrapper->field_twilio_room_status->set($room_status);
+
               // $in_progress_wrapper->field_twilio_room_statuscallback->set($_REQUEST['StatusCallbackEvent']);
               $in_progress_wrapper->save();
               if(isset($in_progress_data_item->field_twilio_video_members[LANGUAGE_NONE])){
@@ -3780,9 +3856,21 @@ function hook_group_rooms(){
                   $item_member_load_type = $twilio_video_members_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
 
                   switch ($item_member_load_type) {
+                    case 'caller':{
+                      // ------------------- update status members
+                      $caller_wrapper = entity_metadata_wrapper('field_collection_item', $twilio_video_members_item);
+                      $caller_wrapper->field_twilio_room_statuscallback->set($status_callback);
+                      $caller_wrapper->save();
+
+                      $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $in_progress_data_item->hostEntity()->uid .'/outgoing_call/'. $in_progress_data_item_uuid . '/members/' . $members_v['value'], array('status_callback'=>$status_callback));
+                      // ------------------- update status members
+
+                    }
+                      break;
+
                     case 'participant':{
                       // ส่วนรายละเอียดของ Caller
-                      $caller = get_caller($room_name);
+                      $caller = get_caller($in_progress_data_item);
                       // ส่วนรายละเอียดของ Caller
 
                       if (!is_null($caller)) {
@@ -3795,6 +3883,16 @@ function hook_group_rooms(){
                         // เราจะได้ friend id ของเพือนทีเราจะพร้อมส่ง voip ไปหา
                         $twv_members_friend_id = $twilio_video_members_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
                         // watchdog(TAG, 'hook_group_rooms - field_twv_members_friend_id: %field_twv_members_friend_id ', array('%field_twv_members_friend_id'=> $field_twv_members_friend_id), WATCHDOG_INFO);
+
+
+                        // ------------------- update status members
+                        $caller_wrapper = entity_metadata_wrapper('field_collection_item', $twilio_video_members_item);
+                        $caller_wrapper->field_twilio_room_statuscallback->set($status_callback);
+                        $caller_wrapper->save();
+
+                        $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $in_progress_data_item->hostEntity()->uid .'/outgoing_call/'. $in_progress_data_item_uuid . '/members/' . $members_v['value'], array('status_callback'=>$status_callback));
+                        // ------------------- update status members
+
 
 
                         //////////////////////// 1 /////////////////////////////
@@ -3814,13 +3912,14 @@ function hook_group_rooms(){
                               $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
                               $action         = 'call';
                               $handle         = array(
-                                                "room_name" => $room_name,
-                                                "uid"       => $uid_caller, 
-                                                "name"      => $name_caller, // ชือของ caller
-                                                "uuid"      => $uuid,
-                                                "token"     => $friend_id_token,
-                                                "has_video" => $has_video,
-                                                "status"    => 'init'
+                                                "room_name"     => $room_name,
+                                                "uid"           => $uid_caller, 
+                                                "name"          => $name_caller, // ชือของ caller
+                                                "uuid"          => $uuid,
+                                                "token"         => $friend_id_token,
+                                                "has_video"     => $has_video,
+                                                "room_status"   => $room_status,
+                                                "status_callback"=> $status_callback,
                                                 );
 
                               try {
@@ -3846,7 +3945,10 @@ function hook_group_rooms(){
                           $incoming_call['field_twilio_room_uuid'][LANGUAGE_NONE][0]['value']   = $uuid;
                           $incoming_call['field_twilio_ic_token'][LANGUAGE_NONE][0]['value']    = $friend_id_token;
                           $incoming_call['field_twilio_ic_has_video'][LANGUAGE_NONE][0]['value']= $has_video;
-                          $incoming_call['field_twilio_ic_status'][LANGUAGE_NONE][0]['value']   = 'init';
+                          // $incoming_call['field_twilio_ic_status'][LANGUAGE_NONE][0]['value']   = 'init';
+
+                          $incoming_call['field_twilio_room_status'][LANGUAGE_NONE][0]['value'] = $room_status;
+                          $incoming_call['field_twilio_room_statuscallback'][LANGUAGE_NONE][0]['value'] = $status_callback;
 
                           $field_entity = entity_create('field_collection_item', $incoming_call);
                           $field_entity->setHostEntity('profile2', $friend_profile);
@@ -3859,7 +3961,8 @@ function hook_group_rooms(){
                                   "uuid"            => $uuid,
                                   "token"           => $friend_id_token,
                                   "has_video"       => $has_video,
-                                  "status"          => 'init',
+                                  "room_status"     => $room_status,
+                                  "status_callback" => $status_callback,
                                   "item_id"         => $field_entity->item_id,
                                   "outgoing_call_item_id" => $hostentity_id,
                                   "outgoing_call_member_item_id" => $members_v['value']
@@ -3888,42 +3991,52 @@ function hook_group_rooms(){
             */
             watchdog(TAG, 'hook_group_rooms > participant-connected : %item_id', array('%item_id'=> serialize($_REQUEST)), WATCHDOG_INFO);
 
+
             // Uid ของคนที่เชือมต่อเข้ามาใน room
             $participant_id  = $_REQUEST['ParticipantIdentity'];
             $room_name       = $_REQUEST['RoomName'];
 
-            $query    = new EntityFieldQuery();
-            $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                        ->entityCondition('bundle', 'field_twilio_video_members')
-                        ->fieldCondition('field_twv_members_friend_id', 'value', $participant_id, '=')
-                        ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
-                        ->execute();
+            $pc_query    = new EntityFieldQuery();
+            $pc_entities = $pc_query->entityCondition('entity_type', 'field_collection_item')
+                                    ->entityCondition('bundle', 'field_twilio_outgoing_call')
+                                    ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
+                                    ->execute();
 
-            // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
-            if (!empty($entities['field_collection_item'])) {
-              $item_id = array_keys($entities['field_collection_item'])[0];
-              $data_item = field_collection_item_load($item_id);
+            if (!empty($pc_entities['field_collection_item'])) {
+              $pc_item_id   = array_keys($pc_entities['field_collection_item'])[0];
+              $pc_data_item = field_collection_item_load($pc_item_id);
 
-              $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-              $wrapper->field_twilio_room_statuscallback->set($_REQUEST['StatusCallbackEvent']);
-              $wrapper->save();
+              if(isset($pc_data_item->field_twilio_video_members[LANGUAGE_NONE])){
+                foreach ($pc_data_item->field_twilio_video_members[LANGUAGE_NONE] as $members_k => $members_v) {
+                  $twilio_video_members_item = field_collection_item_load($members_v['value']);
 
-              $member_type =  $data_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
+                  $item_member_load_uid   = $twilio_video_members_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
+                  $item_member_load_type  = $twilio_video_members_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
 
-              switch ($member_type) {
-                case 'participant':{
-                  // กรณ๊เป็นสมาชิกเราต้องไป update field_twilio_incoming_call ด้วย
-
+                  //
+                  // เราจะ update member ที่ uid ตรงเท่านั้น
+                  //
+                  if(strcasecmp($item_member_load_uid, $participant_id) == 0){
+                    $item_wrapper = entity_metadata_wrapper('field_collection_item', $twilio_video_members_item);
+                    $item_wrapper->field_twilio_room_statuscallback->set($_REQUEST['StatusCallbackEvent']);
+                    $item_wrapper->save();
                   }
-                  break;
-                
-                default:
-                  # code...
-                  break;
-              }
 
-              
+                  switch ($item_member_load_type) {
+                    case 'participant':{
+                      // กรณ๊เป็นสมาชิกเราต้องไป update field_twilio_incoming_call ด้วย
+
+                      }
+                      break;
+                    
+                    default:
+                      # code...
+                      break;
+                  }
+                }
+              }
             }
+
           } 
           break;
 
@@ -3940,217 +4053,6 @@ function hook_group_rooms(){
             break;
         }
         break;
-        // https://www.twilio.com/docs/video/api/status-callbacks
-        switch ($_REQUEST['StatusCallbackEvent']) {
-          case 'room-created':{
-              
-          } 
-            break;
-
-          /*
-          เราจะ handle กรณี type user == 'caller' เท่านั้นโดยเราส่ง voip ไปหาเพือนทีเราโทรหาทั้งหมด
-          
-          case 'track-added': {
-              // uid          : ParticipantIdentity
-              // room name    : RoomName
-              $uid            = $_REQUEST['ParticipantIdentity']; // เป็น uid ของคนที connect เข้าห้อง
-              $room_name      = $_REQUEST['RoomName'];            // ชื่อของห้อง
-              $ParticipantSid = $_REQUEST['ParticipantSid'];      // id ของ uid คนนี้โดย twilio เป็นคนสร้างให้อัติโนมัติ
-
-
-              global $firebase;
-              $query    = new EntityFieldQuery();
-              $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                          ->entityCondition('bundle', 'field_twilio_video_members')
-                          ->fieldCondition('field_twv_members_friend_id', 'value', $uid, '=')
-                          ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
-                          ->execute();
-
-              // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
-              if (!empty($entities['field_collection_item'])) {
-                $item_id = array_keys($entities['field_collection_item'])[0];
-                // watchdog(TAG, 'StatusCallbackEvent > participant-connected : %item_id', array('%item_id'=> $item_id), WATCHDOG_INFO);
-
-                $data_item = field_collection_item_load($item_id);
-                if ($data_item) {
-                  $type = $data_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-                  switch ($type) {
-                    case 'caller':{
-                      // // $host_entity = $data_item->hostEntity()->item_id;
-
-                      $host_data_item = field_collection_item_load($data_item->hostEntity()->item_id);
-                      $uuid  = $host_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-                      
-                      
-                      // udpate drupal & firebase
-                      // udpate status status ให้กับ caller == 'connected' 
-                      $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-                      if(strcasecmp($data_item->field_twv_members_status[LANGUAGE_NONE][0]['value'], 'connected') != 0){
-                        $wrapper->field_twv_members_status->set('connected');
-                        $wrapper->save();
-                      }
-
-                      // เป็นการ update status caller == 'connected' บอกว่ามีการรับสายแล้ว
-                      $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $data_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'] .'/outgoing_call/'. $uuid .'/members/'. $item_id, array("status"    => 'connected'));
-
-                      // udpate drupal & firebase
-
-
-
-                      // Outgoing Call
-
-                      // จะได้ uid ของ caller โดยเราต้องดึงเอาข้อมูล profile
-                      $uid_caller     = $data_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-                      $profile_caller = profile2_by_uid_load($uid_caller, 'main');
-                      $name_caller    = $profile_caller->field_profile_display_name[LANGUAGE_NONE][0]['value'];
-                      // $uuid_caller    = $profile_caller->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-                      // เป็นดึงเอา item parent ของ $data_item แล้วเราก็ load members ทั้งหมด filter เฉพาะ item_member_load_type == 'participant' แล้วก็ load profile ตาม friend_id ทีได้ เพือส่ง voip
-                      //
-                      // 
-                      $data_item_outgoing_call = field_collection_item_load($data_item->hostEntity()->item_id);
-
-                      $room_name = $data_item_outgoing_call->field_twilio_room_name[LANGUAGE_NONE][0]['value'];
-                      $has_video = $data_item_outgoing_call->field_twilio_ic_has_video[LANGUAGE_NONE][0]['value'];
-                      $uuid      = $data_item_outgoing_call->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-                      $query    = new EntityFieldQuery();
-                      $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                          ->entityCondition('bundle', 'field_twilio_incoming_call')
-                          ->fieldCondition('field_twilio_ic_name', 'value', $room_name, '=')
-                          ->fieldCondition('field_twilio_room_uuid', 'value', $uuid, '=')
-                          ->execute();
-                      
-                      if (!empty($entities['field_collection_item'])) {
-                        return;
-                      }
-
-                      // watchdog(TAG, 'StatusCallbackEvent > participant-connected: %StatusCallbackEvent', array('%StatusCallbackEvent'=> $_REQUEST['StatusCallbackEvent']), WATCHDOG_INFO);
-
-                      if(isset($data_item_outgoing_call->field_twilio_video_members)){
-                        foreach ($data_item_outgoing_call->field_twilio_video_members[LANGUAGE_NONE] as $k => $v) {
-                          $item_member_load = field_collection_item_load($v['value']);
-
-                          $item_member_load_type = $item_member_load->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-
-                          switch ($item_member_load_type) {
-                            case 'participant':{
-
-                              // เราจะได้ friend id ของเพือนทีเราจะพร้อมส่ง voip ไปหา
-                              $field_twv_members_friend_id = $item_member_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-                              // watchdog(TAG, 'hook_group_rooms - field_twv_members_friend_id: %field_twv_members_friend_id ', array('%field_twv_members_friend_id'=> $field_twv_members_friend_id), WATCHDOG_INFO);
-
-
-                              //////////////////////// 1 /////////////////////////////
-      
-                              //   เป็นการดึงข้อมูลของ friend_id ขึ้นมาเพือเอา pushkit_token โดย friend_id 1 id อาจมีมากกว่ากว่า 1 pushkit_token ก้ได้เราจึงต้อง ดึงมาทั้งเพือส่งไปแจ้ง friend_id นั้นๆ
-
-                              $friend_id_token  = create_access_token($field_twv_members_friend_id, $room_name);
-                              $friend_profile   = profile2_by_uid_load($field_twv_members_friend_id, 'main');
-
-                              $flag = false;
-                              if(isset($friend_profile->field_device_access)){
-
-                                foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-                                  $item_load = field_collection_item_load($value['value']);
-
-                                  
-
-                                  if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0) {
-
-                                    $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-                                    $action         = 'call';
-                                    $handle         = array(
-                                                      "room_name" => $room_name,
-                                                      "uid"       => $uid_caller, 
-                                                      "name"      => $name_caller, // ชือของ caller
-                                                      "uuid"      => $uuid,
-                                                      "token"     => $friend_id_token,
-                                                      "has_video" => $has_video,
-                                                      "status"    => 'init'
-                                                      );
-
-                                    try {
-                                      apns_voip($pushkit_token, $action, $uuid, $handle, $has_video);  
-                                    } catch (Exception $e) {
-                                      // echo 'Caught exception: ',  $e->getMessage(), "\n";
-
-                                      watchdog(TAG, 'hook_group_rooms 1z : %params', array('%params'=> $e->getMessage()), WATCHDOG_INFO);
-                                    }
-                                    $flag = true;
-                                  }
-                                }
-                              }
-
-                              if ($flag) {
-                                // insert incoming call ให้กับ friend ที่เรา call ไป
-                                // $friend_profile
-                                $incoming_call = array();
-                                $incoming_call['field_name'] = 'field_twilio_incoming_call'; 
-
-                                $incoming_call['field_twilio_ic_name'][LANGUAGE_NONE][0]['value']     = $room_name;
-                                $incoming_call['field_twilio_ic_uid'][LANGUAGE_NONE][0]['value']      = $uid_caller;     // uid caller
-                                $incoming_call['field_twilio_room_uuid'][LANGUAGE_NONE][0]['value']   = $uuid;
-                                $incoming_call['field_twilio_ic_token'][LANGUAGE_NONE][0]['value']    = $friend_id_token;
-                                $incoming_call['field_twilio_ic_has_video'][LANGUAGE_NONE][0]['value']= $has_video;
-                                $incoming_call['field_twilio_ic_status'][LANGUAGE_NONE][0]['value']   = 'init';
-
-                                $field_entity = entity_create('field_collection_item', $incoming_call);
-                                $field_entity->setHostEntity('profile2', $friend_profile);
-                                $field_entity->save();
-
-                                $value = array(
-                                        "room_name"       => $room_name,
-                                        "uid"             => $uid_caller,
-                                        "name"            => $name_caller, // ชือของ caller
-                                        "uuid"            => $uuid,
-                                        "token"           => $friend_id_token,
-                                        "has_video"       => $has_video,
-                                        "status"          => 'init',
-                                        "item_id"         => $field_entity->item_id,
-                                        "outgoing_call_item_id" => $data_item->hostEntity()->item_id,
-                                        "outgoing_call_member_item_id" => $v['value']
-                                      );
-
-                                $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $field_twv_members_friend_id .'/incoming_call/'. $uuid, $value);
-                              }
-                              //////////////////////// 1 /////////////////////////////
-                            }
-                              break;
-                            
-                            default:
-                              # code...
-                              break;
-                          }
-                        }
-                      }
-                      
-                    }
-                      break;
-
-                    case 'participant':{
-
-
-                    }
-                      break;
-                    
-                    default:
-                      # code...
-                      break;
-                  }
-
-                }
-              }
-            }
-            break;
-            /** */
-          
-          default:
-            # code...
-            break;
-        }
     }// end-case
       break;
 
@@ -4186,559 +4088,6 @@ function hook_group_rooms(){
       # code...
       break;
   }
-
-  return;
-
-  watchdog(TAG, 'hook_group_rooms : %item_id', array('%item_id'=> serialize($_REQUEST)), WATCHDOG_INFO);
-  if (isset($_REQUEST['StatusCallbackEvent'])) {
-    switch ($_REQUEST['StatusCallbackEvent']) {
-      case 'room-created':{
-        if (empty($_REQUEST['RoomName']) || empty($_REQUEST['RoomSid'])) {
-          return;
-        }
-
-        watchdog(TAG, 'room-created : %item_id', array('%item_id'=> serialize($_REQUEST)), WATCHDOG_INFO);
-
-        $RoomName = $_REQUEST['RoomName'];
-        $RoomSid  = $_REQUEST['RoomSid'];
-
-        $query    = new EntityFieldQuery();
-        $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                      ->fieldCondition('field_twilio_room_name', 'value', $RoomName, '=')
-                      ->execute();
-
-        if (!empty($entities['field_collection_item'])) {
-          $item_id = array_keys($entities['field_collection_item'])[0];
-          $data_item = field_collection_item_load($item_id);
-
-          $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-          $wrapper->field_twilio_room_sid->set($RoomSid);
-          $wrapper->field_twilio_room_status->set($_REQUEST['StatusCallbackEvent']);
-          $wrapper->save();
-        }
-      }
-      break;
-  
-      case 'room-ended': {
-        if (empty($_REQUEST['RoomName']) || empty($_REQUEST['RoomSid'])) {
-          return;
-        }
-
-        watchdog(TAG, 'room-ended : %item_id', array('%item_id'=> serialize($_REQUEST)), WATCHDOG_INFO);
-
-        $RoomName = $_REQUEST['RoomName'];
-        $RoomSid  = $_REQUEST['RoomSid'];
-
-        global $firebase;
-
-        $query    = new EntityFieldQuery();
-        $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                      ->fieldCondition('field_twilio_room_name', 'value', $RoomName, '=')
-                      ->execute();
-
-        if (!empty($entities['field_collection_item'])) {
-          $item_id = array_keys($entities['field_collection_item'])[0];
-          $data_item = field_collection_item_load($item_id);
-
-
-          if(isset($data_item->field_twilio_video_members)){
-            foreach ($data_item->field_twilio_video_members[LANGUAGE_NONE] as $k => $v) {
-
-              $video_members_item_load = field_collection_item_load($v['value']);
-
-              // เราจะได้
-              $field_twv_members_friend_id = $video_members_item_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-              $field_twv_members_type = $video_members_item_load->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-              $field_twilio_room_uuid = $data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-              
-              // เราต้อง update incoming_call ของ  field_twv_members_type == 'participant' เท่านั้น
-              switch ($field_twv_members_type) {
-                case 'participant':{
-                    $participant_query    = new EntityFieldQuery();
-                    $participant_entities = $participant_query->entityCondition('entity_type', 'field_collection_item')
-                                  ->entityCondition('bundle', 'field_twilio_incoming_call')
-                                  ->fieldCondition('field_twilio_ic_name', 'value', $RoomName, '=')
-                                  ->fieldCondition('field_twilio_room_uuid', 'value', $field_twilio_room_uuid, '=')
-                                  ->execute();
-
-                    if (!empty($participant_entities['field_collection_item'])) {
-                      $participant_entities_item_id = array_keys($participant_entities['field_collection_item'])[0];
-
-                      $participant_entities_data_item_load = field_collection_item_load($participant_entities_item_id);
-
-                      $participant_item_load_wrapper = entity_metadata_wrapper('field_collection_item', $participant_entities_data_item_load);
-                      $participant_item_load_wrapper->field_twilio_ic_status->set($_REQUEST['StatusCallbackEvent']);
-                      $participant_item_load_wrapper->save();
-
-                      // watchdog(TAG, 'StatusCallbackEvent > room-ended: %field_twv_members_friend_id - %participant_entities_item_id', array('%field_twv_members_friend_id'=> $field_twv_members_friend_id, '%participant_entities_item_id' => $participant_entities_item_id), WATCHDOG_INFO);
-
-
-                      // เราต้อง update data firebase ด้วย
-                      $value = array(
-                                    "status"          => $_REQUEST['StatusCallbackEvent']
-                                  );
-
-                      $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $field_twv_members_friend_id .'/incoming_call/'. $field_twilio_room_uuid, $value);
-                    }
-                  }
-                  break;
-                
-                default:
-                  # code...
-                  break;
-              }
-              
-
-              $video_members_item_load_wrapper = entity_metadata_wrapper('field_collection_item', $video_members_item_load);
-              $video_members_item_load_wrapper->field_twv_members_status->set($_REQUEST['StatusCallbackEvent']);
-              $video_members_item_load_wrapper->save();
-
-            }
-          }
-
-          $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-          $wrapper->field_twilio_room_sid->set($RoomSid);
-          $wrapper->field_twilio_room_status->set($_REQUEST['StatusCallbackEvent']);
-          $wrapper->save();
-        }
-      }
-      break;
-
-      /*
-      เราจะ handle กรณี type user == 'caller' เท่านั้นโดยเราส่ง voip ไปหาเพือนทีเราโทรหาทั้งหมด
-      */
-      case 'participant-connected': {
-          // uid          : ParticipantIdentity
-          // room name    : RoomName
-          $uid            = $_REQUEST['ParticipantIdentity']; // เป็น uid ของคนที connect เข้าห้อง
-          $room_name      = $_REQUEST['RoomName'];            // ชื่อของห้อง
-          $ParticipantSid = $_REQUEST['ParticipantSid'];      // id ของ uid คนนี้โดย twilio เป็นคนสร้างให้อัติโนมัติ
-
-
-          global $firebase;
-
-          
-          
-          $query    = new EntityFieldQuery();
-          $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_video_members')
-                      ->fieldCondition('field_twv_members_friend_id', 'value', $uid, '=')
-                      ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
-                      ->execute();
-
-          // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
-          if (!empty($entities['field_collection_item'])) {
-            $item_id = array_keys($entities['field_collection_item'])[0];
-            // watchdog(TAG, 'StatusCallbackEvent > participant-connected : %item_id', array('%item_id'=> $item_id), WATCHDOG_INFO);
-
-
-
-            $data_item = field_collection_item_load($item_id);
-            if ($data_item) {
-              $type = $data_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-
-
-              switch ($type) {
-                case 'caller':{
-                  // // $host_entity = $data_item->hostEntity()->item_id;
-
-                  $host_data_item = field_collection_item_load($data_item->hostEntity()->item_id);
-                  $uuid  = $host_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-                  
-                  
-                  // udpate drupal & firebase
-                  // udpate status status ให้กับ caller == 'connected' 
-                  $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-                  if(strcasecmp($data_item->field_twv_members_status[LANGUAGE_NONE][0]['value'], 'connected') != 0){
-                    $wrapper->field_twv_members_status->set('connected');
-                    $wrapper->save();
-                  }
-
-                  // เป็นการ update status caller == 'connected' บอกว่ามีการรับสายแล้ว
-                  $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $data_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'] .'/outgoing_call/'. $uuid .'/members/'. $item_id, array("status"    => 'connected'));
-
-                  // udpate drupal & firebase
-
-
-
-                  // Outgoing Call
-
-                  // จะได้ uid ของ caller โดยเราต้องดึงเอาข้อมูล profile
-                  $uid_caller     = $data_item->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-                  $profile_caller = profile2_by_uid_load($uid_caller, 'main');
-                  $name_caller    = $profile_caller->field_profile_display_name[LANGUAGE_NONE][0]['value'];
-                  // $uuid_caller    = $profile_caller->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-                  // เป็นดึงเอา item parent ของ $data_item แล้วเราก็ load members ทั้งหมด filter เฉพาะ item_member_load_type == 'participant' แล้วก็ load profile ตาม friend_id ทีได้ เพือส่ง voip
-                  //
-                  // 
-                  $data_item_outgoing_call = field_collection_item_load($data_item->hostEntity()->item_id);
-
-                  $room_name = $data_item_outgoing_call->field_twilio_room_name[LANGUAGE_NONE][0]['value'];
-                  $has_video = $data_item_outgoing_call->field_twilio_ic_has_video[LANGUAGE_NONE][0]['value'];
-                  $uuid      = $data_item_outgoing_call->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-                  $query    = new EntityFieldQuery();
-                  $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_incoming_call')
-                      ->fieldCondition('field_twilio_ic_name', 'value', $room_name, '=')
-                      ->fieldCondition('field_twilio_room_uuid', 'value', $uuid, '=')
-                      ->execute();
-
-
-                  
-                  if (!empty($entities['field_collection_item'])) {
-                    return;
-                  }
-
-                  // watchdog(TAG, 'StatusCallbackEvent > participant-connected: %StatusCallbackEvent', array('%StatusCallbackEvent'=> $_REQUEST['StatusCallbackEvent']), WATCHDOG_INFO);
-
-                  // 
-
-                  if(isset($data_item_outgoing_call->field_twilio_video_members)){
-
-
-                    foreach ($data_item_outgoing_call->field_twilio_video_members[LANGUAGE_NONE] as $k => $v) {
-                      $item_member_load = field_collection_item_load($v['value']);
-
-                      $item_member_load_type = $item_member_load->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-
-                      switch ($item_member_load_type) {
-                        case 'participant':{
-
-                          // เราจะได้ friend id ของเพือนทีเราจะพร้อมส่ง voip ไปหา
-                          $field_twv_members_friend_id = $item_member_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-                          // watchdog(TAG, 'hook_group_rooms - field_twv_members_friend_id: %field_twv_members_friend_id ', array('%field_twv_members_friend_id'=> $field_twv_members_friend_id), WATCHDOG_INFO);
-
-
-                          //////////////////////// 1 /////////////////////////////
-  
-                          //   เป็นการดึงข้อมูลของ friend_id ขึ้นมาเพือเอา pushkit_token โดย friend_id 1 id อาจมีมากกว่ากว่า 1 pushkit_token ก้ได้เราจึงต้อง ดึงมาทั้งเพือส่งไปแจ้ง friend_id นั้นๆ
-
-                          $friend_id_token  = create_access_token($field_twv_members_friend_id, $room_name);
-                          $friend_profile   = profile2_by_uid_load($field_twv_members_friend_id, 'main');
-
-                          $flag = false;
-                          if(isset($friend_profile->field_device_access)){
-
-                            foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-                              $item_load = field_collection_item_load($value['value']);
-
-                              
-
-                              if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0) {
-
-                                $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-                                $action         = 'call';
-                                $handle         = array(
-                                                  "room_name" => $room_name,
-                                                  "uid"       => $uid_caller, 
-                                                  "name"      => $name_caller, // ชือของ caller
-                                                  "uuid"      => $uuid,
-                                                  "token"     => $friend_id_token,
-                                                  "has_video" => $has_video,
-                                                  "status"    => 'init'
-                                                  );
-
-                                try {
-                                  apns_voip($pushkit_token, $action, $uuid, $handle, $has_video);  
-                                } catch (Exception $e) {
-                                  // echo 'Caught exception: ',  $e->getMessage(), "\n";
-
-                                  watchdog(TAG, 'hook_group_rooms 1z : %params', array('%params'=> $e->getMessage()), WATCHDOG_INFO);
-                                }
-                                $flag = true;
-                              }
-                            }
-                          }
-
-
-
-                          if ($flag) {
-                            // insert incoming call ให้กับ friend ที่เรา call ไป
-                            // $friend_profile
-                            $incoming_call = array();
-                            $incoming_call['field_name'] = 'field_twilio_incoming_call'; 
-
-                            $incoming_call['field_twilio_ic_name'][LANGUAGE_NONE][0]['value']     = $room_name;
-                            $incoming_call['field_twilio_ic_uid'][LANGUAGE_NONE][0]['value']      = $uid_caller;     // uid caller
-                            $incoming_call['field_twilio_room_uuid'][LANGUAGE_NONE][0]['value']   = $uuid;
-                            $incoming_call['field_twilio_ic_token'][LANGUAGE_NONE][0]['value']    = $friend_id_token;
-                            $incoming_call['field_twilio_ic_has_video'][LANGUAGE_NONE][0]['value']= $has_video;
-                            $incoming_call['field_twilio_ic_status'][LANGUAGE_NONE][0]['value']   = 'init';
-
-                            $field_entity = entity_create('field_collection_item', $incoming_call);
-                            $field_entity->setHostEntity('profile2', $friend_profile);
-                            $field_entity->save();
-
-                            $value = array(
-                                    "room_name"       => $room_name,
-                                    "uid"             => $uid_caller,
-                                    "name"            => $name_caller, // ชือของ caller
-                                    "uuid"            => $uuid,
-                                    "token"           => $friend_id_token,
-                                    "has_video"       => $has_video,
-                                    "status"          => 'init',
-                                    "item_id"         => $field_entity->item_id,
-                                    "outgoing_call_item_id" => $data_item->hostEntity()->item_id,
-                                    "outgoing_call_member_item_id" => $v['value']
-                                  );
-
-                            $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $field_twv_members_friend_id .'/incoming_call/'. $uuid, $value);
-                          }
-                          //////////////////////// 1 /////////////////////////////
-                        }
-                          break;
-                        
-                        default:
-                          # code...
-                          break;
-                      }
-                    }
-                  }
-                  
-                  /*
-                      if(isset($friend_profile->field_device_access)){
-                          foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-                            $item_load = field_collection_item_load($value['value']);
-
-                            if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0) {
-
-                              $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-                              $action         = 'cancel';
-                              $handle         = array();
-                              $has_video      = "0";
-
-                              watchdog(TAG, 'caller-cancel > participant-disconnected : %item_id', array('%item_id'=>$pushkit_token), WATCHDOG_INFO);
-                  
-                              // apns_voip($pushkit_token, $action, $uuid, $friend_id_token, $handle, $has_video); 
-                              apns_voip($pushkit_token, $action, $uuid,$handle, $has_video);   
-                            }
-                          }
-                        }
-                  */
-
-                }
-                  break;
-
-                case 'participant':{
-
-
-                }
-                  break;
-                
-                default:
-                  # code...
-                  break;
-              }
-
-            }
-          }
-        }
-        break;
-    }
-  }
-
-  /*
-  if (isset($_REQUEST['StatusCallbackEvent'])) {
-    # code...
-    watchdog(TAG, 'StatusCallbackEvent: %param | %StatusCallbackEvent', array('%param'=>serialize($_REQUEST), '%StatusCallbackEvent'=> $_REQUEST['StatusCallbackEvent']), WATCHDOG_INFO);
-
-    switch ($_REQUEST['StatusCallbackEvent']) {
-      case 'room-created':{
-          $RoomName = $_REQUEST['RoomName'];
-          $RoomSid  = $_REQUEST['RoomSid'];
-
-          $query    = new EntityFieldQuery();
-          $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                        ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                        ->fieldCondition('field_twilio_room_name', 'value', $RoomName, '=')
-                        ->execute();
-
-          if (!empty($entities['field_collection_item'])) {
-            $item_id = array_keys($entities['field_collection_item'])[0];
-            $data_item = field_collection_item_load($item_id);
-
-            $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-            $wrapper->field_twilio_room_sid->set($RoomSid);
-            $wrapper->field_twilio_room_status->set($_REQUEST['StatusCallbackEvent']);
-            $wrapper->save();
-          }
-        }
-        break;
-      case 'room-ended': {
-          $RoomName = $_REQUEST['RoomName'];
-          $RoomSid  = $_REQUEST['RoomSid'];
-
-          $query    = new EntityFieldQuery();
-          $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                        ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                        ->fieldCondition('field_twilio_room_name', 'value', $RoomName, '=')
-                        ->execute();
-
-          if (!empty($entities['field_collection_item'])) {
-            $item_id = array_keys($entities['field_collection_item'])[0];
-            $data_item = field_collection_item_load($item_id);
-
-            $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-            $wrapper->field_twilio_room_sid->set($RoomSid);
-            $wrapper->field_twilio_room_status->set($_REQUEST['StatusCallbackEvent']);
-            $wrapper->save();
-          }
-        }
-        break;
-      case 'participant-connected':{
-          // uid          : ParticipantIdentity
-          // room name    : RoomName
-          $uid            = $_REQUEST['ParticipantIdentity'];
-          $room_name      = $_REQUEST['RoomName'];
-          $ParticipantSid = $_REQUEST['ParticipantSid'];
-
-          $query    = new EntityFieldQuery();
-          $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_video_members')
-                      ->fieldCondition('field_twv_members_friend_id', 'value', $uid, '=')
-                      ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
-                      ->execute();
-
-          // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
-          if (!empty($entities['field_collection_item'])) {
-            $item_id = array_keys($entities['field_collection_item'])[0];
-            // watchdog(TAG, 'StatusCallbackEvent > participant-connected : %item_id', array('%item_id'=> $item_id), WATCHDOG_INFO);
-
-            $data_item = field_collection_item_load($item_id);
-            if ($data_item) {
-              $type = $data_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-              switch ($type) {
-                case 'caller':{
-                  
-                  // $wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-                  // if(strcasecmp($data_item->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $device_id) != 0){
-                  //   $wrapper->field_twilio_ic_device_id->set($device_id);
-                  //   $wrapper->save();
-                  // }
-                  
-                }
-                  break;
-
-                case 'participant':{
-
-
-                }
-                  break;
-                
-                default:
-                  # code...
-                  break;
-              }
-
-            }
-          }
-        }
-        break;
-      case 'participant-disconnected':{
-          //   ParticipantIdentity : uid ของเพือน ยกเลิกเชือมต่อ
-          $uid        = $_REQUEST['ParticipantIdentity'];
-          $room_name  = $_REQUEST['RoomName'];
-
-          $query    = new EntityFieldQuery();
-          $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_video_members')
-                      ->fieldCondition('field_twv_members_friend_id', 'value', $uid, '=')
-                      ->fieldCondition('field_twilio_room_name', 'value', $room_name, '=')
-                      ->execute();
-
-          // watchdog(TAG, 'StatusCallbackEvent > xxx: %item_id', array('%item_id'=> serialize($entities)), WATCHDOG_INFO);
-          if (!empty($entities['field_collection_item'])) {
-            $item_id = array_keys($entities['field_collection_item'])[0];
-            // watchdog(TAG, 'StatusCallbackEvent > participant-connected : %item_id', array('%item_id'=> $item_id), WATCHDOG_INFO);
-
-            $data_item = field_collection_item_load($item_id);
-            if ($data_item) {
-              $type = $data_item->field_twv_members_type[LANGUAGE_NONE][0]['value'];
-
-              switch ($type) {
-                case 'caller':{
-
-                  // $host_entity = $data_item->hostEntity()->item_id;
-                  // watchdog(TAG, 'caller > participant-disconnected : %item_id', array('%item_id'=>$host_entity), WATCHDOG_INFO);
-                  
-                  $parent_nid       = $data_item->hostEntity()->item_id;
-                  $parent_data_item = field_collection_item_load($parent_nid);
-
-                  // เราจะได้ uuid มาเพือส่ง(Voip)ไปบอก friend บอกว่า cancel call
-                  $uuid = $parent_data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
-
-                  if (isset($parent_data_item->field_twilio_video_members)) {
-                    foreach ($parent_data_item->field_twilio_video_members[LANGUAGE_NONE] as $key => $v) {
-                      $item_load = field_collection_item_load($v['value']);
-                      if(strcasecmp($item_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'], $uid) != 0){
-                        // $wrapper = entity_metadata_wrapper('field_collection_item', $item_load);
-                        // if(strcasecmp($item_load->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $device_id) != 0){
-                        //   $wrapper->field_twilio_ic_device_id->set($device_id);
-                        //   $wrapper->save();
-                        // }
-
-                        //break;
-
-                        
-                        // เราจะได้ friend_id มาเพือส่ง voip ไปบอก cancel call
-                        
-                        $friend_id = $item_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'];
-                        $friend_profile = profile2_by_uid_load($friend_id, 'main');
-                        if(isset($friend_profile->field_device_access)){
-                          foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-                            $item_load = field_collection_item_load($value['value']);
-
-                            if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0) {
-
-                              $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-                              $action         = 'cancel';
-                              $handle         = array();
-                              $has_video      = "0";
-
-                              watchdog(TAG, 'caller-cancel > participant-disconnected : %item_id', array('%item_id'=>$pushkit_token), WATCHDOG_INFO);
-                  
-                              // apns_voip($pushkit_token, $action, $uuid, $friend_id_token, $handle, $has_video); 
-                              apns_voip($pushkit_token, $action, $uuid,$handle, $has_video);   
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-                  break;
-
-                case 'participant':{
-                  $parent_nid = $data_item->hostEntity()->nid;
-
-                }
-                  break;
-                
-                default:
-                  # code...
-                  break;
-              }
-
-            }
-          }
-
-        }
-        break;
-      default:
-        # code...
-        break;
-    }
-  }
-
-  */
 
   return;
 }
@@ -7634,17 +6983,17 @@ function ___twilio_voice($headers, $request, $room_name){
   $outgoing_call = array();
   $outgoing_call['field_name'] = 'field_twilio_outgoing_call'; 
 
-  $outgoing_call['field_twilio_room_status'][LANGUAGE_NONE][0]['value']   = 'init';
   $outgoing_call['field_twilio_room_type'][LANGUAGE_NONE][0]['value']     = 'private';
   $outgoing_call['field_twilio_room_name'][LANGUAGE_NONE][0]['value']     = $room_name;
   $outgoing_call['field_twilio_room_uuid'][LANGUAGE_NONE][0]['value']     = $uuid;
   $outgoing_call['field_twilio_ic_has_video'][LANGUAGE_NONE][0]['value']  = $has_video;
+  $outgoing_call['field_twilio_room_status'][LANGUAGE_NONE][0]['value']   = 'init';
 
-  $field_entity = entity_create('field_collection_item', $outgoing_call);
-  $field_entity->setHostEntity('profile2', $profile);
-  $field_entity->save();
+  $outgoing_call_field_entity = entity_create('field_collection_item', $outgoing_call);
+  $outgoing_call_field_entity->setHostEntity('profile2', $profile);
+  $outgoing_call_field_entity->save();
 
-  $outgoing_call_item_id = $field_entity->item_id;
+  $outgoing_call_item_id = $outgoing_call_field_entity->item_id;
 
   // เราจะ insert members uid{caller} ลงไปคนแรก
   // $data = field_collection_item_load($field_entity->item_id);
@@ -7653,21 +7002,21 @@ function ___twilio_voice($headers, $request, $room_name){
   $value_video_member_1['field_twv_members_friend_id'][LANGUAGE_NONE][0]['value'] = $uid;
   $value_video_member_1['field_twv_members_type'][LANGUAGE_NONE][0]['value']      = "caller";
   $value_video_member_1['field_twv_members_uid_invite'][LANGUAGE_NONE][0]['value']= $uid;
-  $value_video_member_1['field_twilio_room_name'][LANGUAGE_NONE][0]['value']      = $room_name;
+  // $value_video_member_1['field_twilio_room_name'][LANGUAGE_NONE][0]['value']      = $room_name;
   $value_video_member_1['field_twilio_ic_device_id'][LANGUAGE_NONE][0]['value']   = $headers['udid'];
   $value_video_member_1['field_twv_members_status'][LANGUAGE_NONE][0]['value']    = 'init';
+  $value_video_member_1['field_twilio_room_statuscallback'][LANGUAGE_NONE][0]['value']    = 'init'; 
 
-  $field_entity = entity_create('field_collection_item', $value_video_member_1);
-  $field_entity->setHostEntity("field_twilio_video_members", field_collection_item_load($outgoing_call_item_id));
-  $field_entity->save(); 
+  $value_video_member_1_field_entity = entity_create('field_collection_item', $value_video_member_1);
+  $value_video_member_1_field_entity->setHostEntity("field_twilio_video_members", field_collection_item_load($outgoing_call_item_id));
+  $value_video_member_1_field_entity->save(); 
 
-  $members[$field_entity->item_id] = array(
-                  "friend_id" =>$uid,
-                  "type"      =>"caller",
-                  "uid_invite"=>$uid,
-                  "room_name" =>$room_name,
-                  "status"    =>'init',
-                  "device_id" =>$headers['udid']
+  $members[$value_video_member_1_field_entity->item_id] = array(
+                  "friend_id"       =>$uid,
+                  "type"            =>"caller",
+                  "uid_invite"      =>$uid,
+                  "status_callback" =>'init',
+                  "device_id"       =>$headers['udid']
                 );
 
   $value_video_member_2 = array();
@@ -7675,29 +7024,31 @@ function ___twilio_voice($headers, $request, $room_name){
   $value_video_member_2['field_twv_members_friend_id'][LANGUAGE_NONE][0]['value'] = $friend_id;
   $value_video_member_2['field_twv_members_type'][LANGUAGE_NONE][0]['value']      = "participant";
   $value_video_member_2['field_twv_members_uid_invite'][LANGUAGE_NONE][0]['value']= $uid;
-  $value_video_member_2['field_twilio_room_name'][LANGUAGE_NONE][0]['value']      = $room_name;
+  // $value_video_member_2['field_twilio_room_name'][LANGUAGE_NONE][0]['value']      = $room_name;
   $value_video_member_2['field_twv_members_status'][LANGUAGE_NONE][0]['value']    = 'init';
+  $value_video_member_2['field_twilio_room_statuscallback'][LANGUAGE_NONE][0]['value']    = 'init'; 
 
-  $field_entity = entity_create('field_collection_item', $value_video_member_2);
-  $field_entity->setHostEntity("field_twilio_video_members", field_collection_item_load($outgoing_call_item_id));
-  $field_entity->save(); 
+  $value_video_member_2_field_entity = entity_create('field_collection_item', $value_video_member_2);
+  $value_video_member_2_field_entity->setHostEntity("field_twilio_video_members", field_collection_item_load($outgoing_call_item_id));
+  $value_video_member_2_field_entity->save(); 
 
-  $members[$field_entity->item_id] = array(
-                  "friend_id" =>$friend_id,
-                  "type"      =>"participant",
-                  "uid_invite"=>$uid,
-                  "status"    =>'init',
-                  "room_name" =>$room_name
+  $members[$value_video_member_2_field_entity->item_id] = array(
+                  "friend_id"         =>$friend_id,
+                  "type"              =>"participant",
+                  "uid_invite"        =>$uid,
+                  "status_callback"   =>'init',
+                  // "room_name" =>$room_name
                 );
 
 
   /////////////////////////////// Update Data to Firebase ///////////////////////////////
   $value = array(
-              "room_name"    => $room_name,
-              "type"         => 'private',
-              "has_video"    => $has_video,
+              "room_name"             => $room_name,
+              "type"                  => 'private',
+              "has_video"             => $has_video,
+              "room_status"           => 'init',
               "outgoing_call_item_id" => $outgoing_call_item_id,
-              "members"      => $members
+              "members"               => $members
             );
   $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $uid .'/outgoing_call/'. $uuid, $value);
   /////////////////////////////// Update Data to Firebase ///////////////////////////////
@@ -7717,6 +7068,7 @@ function twilio_voice_access_token(){
     $result['message']  = "function : twilio_voice_access_token, parameter";
     return $result;
   }
+
   $time_start = microtime(true);
 
   $uid        = $_REQUEST['uid']; 
@@ -11564,238 +10916,6 @@ function incoming_call(){
 
   $result['result'] = TRUE;
   return $result;
-}
-
-function incoming_call2(){
-  $result = array();
-
-  if (!check_header()) {
-    $result['result']   = FALSE;
-    $result['message']  = "check_header()";
-    return $result;
-  }
-
-  $param = json_decode(file_get_contents('php://input'), true);
-  if (empty($param['uid']) /*|| empty($param['room_name']) */ || empty($param['data'])) {
-    $result['result'] = FALSE;
-    $result['message'] = "function incoming_call : parameter";
-    return $result;
-  }
-
-  global $firebase;
-  $uid        = $param['uid'];
-  // $room_name  = $param['room_name'];
-  $data       = $param['data'];
-
-
-  if (strcasecmp($data["status"], "participant-connected") == 0) {
-    /////////////////////////////// Send Voip Cancel to Friend //////////////////////////////////
-    // เป็นการ หา pushkit token ของแต่ละ user โดยที่แต่ละ user อาจมีหลาย device ด้วย 
-    // โดยมีเงือนไข device นั้น field field_is_login = 1 ถึงเราจะส่งเท่านั้น
-    $friend_profile = profile2_by_uid_load($uid, 'main');
-
-    /*
-    // #1
-    if(isset($friend_profile->field_device_access)){
-      foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-        $item_load = field_collection_item_load($value['value']);
-        
-        //  เรา้ตองเพิ่มเช็กว่า udid != $device_id{เป็น เครื่องที่รับสาย} 
-        
-        if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0 && strcasecmp($item_load->field_udid[LANGUAGE_NONE][0]['value'], $device_id) != 0) {
-          
-          $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-          $action         = 'cancel';
-          $handle         = array(
-                            "room_name"     => $room_name
-                            );
-
-          apns_voip($pushkit_token, $action, $handle);
-        }
-      }
-    }
-    */
-    /////////////////////////////// Send Voip Cancel to Friend //////////////////////////////////
-
-
-    // #2. การ update ข้อมูล drupal  field_twilio_incoming_call ของ uid นั้น
-    if (isset($friend_profile->field_twilio_incoming_call)) {
-      foreach ($friend_profile->field_twilio_incoming_call[LANGUAGE_NONE] as $key => $value) {
-        $item_load = field_collection_item_load($value['value']);
-        if (strcasecmp($item_load->field_twilio_ic_name[LANGUAGE_NONE][0]['value'], $room_name) == 0) {
-          $wrapper = entity_metadata_wrapper('field_collection_item', $item_load);
-          if(strcasecmp($item_load->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $data["device_id"]) != 0){
-            $wrapper->field_twilio_ic_device_id->set($data["device_id"]);
-          }
-          if(strcasecmp($item_load->field_twilio_ic_status[LANGUAGE_NONE][0]['value'], $data["status"]) != 0){
-            $wrapper->field_twilio_ic_status->set($data["status"]);
-          }
-          $wrapper->save();
-        }
-        break;
-      }
-    }
-    // #2
-
-    // #3
-    $query  = new EntityFieldQuery();
-    $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                      ->fieldCondition('field_twilio_room_name', 'value', $data['twilio_room_name'], '=')
-                      ->execute();
-
-    // $result['entities'] = serialize($entities);
-    if (!empty($entities['field_collection_item'])) {
-      // กรณีนี้อาจไม่เกิดขึ้นเลยก็ได้
-      $item_id = array_keys($entities['field_collection_item'])[0];
-
-      $data_item = field_collection_item_load($item_id);
-      if ($data_item) {
-
-        // เราต้องเช็กว่าค่านี้เป็น profile caller หรือไม่
-        $uid_caller = $data_item->hostEntity()->uid;
-
-        if (isset($data_item->field_twilio_video_members)) {
-          foreach ($data_item->field_twilio_video_members[LANGUAGE_NONE] as $key => $value) {
-            $item_load = field_collection_item_load($value['value']);
-            if(strcasecmp($item_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'], $uid) == 0){
-              $wrapper = entity_metadata_wrapper('field_collection_item', $item_load);
-              if(strcasecmp($item_load->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $data["device_id"]) != 0){
-                $wrapper->field_twilio_ic_device_id->set($data["device_id"]);
-              }
-              if(strcasecmp($item_load->field_twv_members_status[LANGUAGE_NONE][0]['value'], $data["status"]) != 0){
-                $wrapper->field_twv_members_status->set($data["status"]);
-              }
-              $wrapper->save();
-
-
-              // udpate firebase caller members
-              $valus_update = array(
-                  "device_id"  => $data["device_id"],
-                  "status"     => $data["status"]
-              );
-              $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $uid_caller . "/outgoing_call/" . $item_id . "/members/" . $value['value'], $valus_update);
-              break;
-            }
-          }
-        }
-
-        // $valus_update = array(
-        //           "status"     => "room-ended"
-        //       );
-        // if (strcasecmp($data_item->field_twilio_room_type[LANGUAGE_NONE][0]['value'], "private") == 0) {
-        //   $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $uid_caller . "/outgoing_call/" . $item_id , $valus_update);
-        // }
-      }
-    }
-    
-
-  }else if(strcasecmp($data["status"], "participant-disconnected") == 0){
-    /////////////////////////////// Send Voip Cancel to Friend //////////////////////////////////
-    // เป็นการ หา pushkit token ของแต่ละ user โดยที่แต่ละ user อาจมีหลาย device ด้วย 
-    // โดยมีเงือนไข device นั้น field field_is_login = 1 ถึงเราจะส่งเท่านั้น
-    $friend_profile = profile2_by_uid_load($uid, 'main');
-
-    /*
-    // #1
-    if(isset($friend_profile->field_device_access)){
-      foreach ($friend_profile->field_device_access[LANGUAGE_NONE] as $key => $value) {
-        $item_load = field_collection_item_load($value['value']);
-        
-        //  เรา้ตองเพิ่มเช็กว่า udid != $device_id{เป็น เครื่องที่รับสาย} 
-        
-        if (strcasecmp($item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'], "") != 0 && strcasecmp($item_load->field_is_login[LANGUAGE_NONE][0]['value'], "1") == 0 && strcasecmp($item_load->field_udid[LANGUAGE_NONE][0]['value'], $device_id) != 0) {
-          
-          $pushkit_token  = $item_load->field_pushkit_token[LANGUAGE_NONE][0]['value'];
-          $action         = 'cancel';
-          $handle         = array(
-                            "room_name"     => $room_name
-                            );
-
-          apns_voip($pushkit_token, $action, $handle);
-        }
-      }
-    }
-    */
-    /////////////////////////////// Send Voip Cancel to Friend //////////////////////////////////
-
-
-    // #2. การ update ข้อมูล drupal  field_twilio_incoming_call ของ uid นั้น
-    if (isset($friend_profile->field_twilio_incoming_call)) {
-      foreach ($friend_profile->field_twilio_incoming_call[LANGUAGE_NONE] as $key => $value) {
-        $item_load = field_collection_item_load($value['value']);
-        if (strcasecmp($item_load->field_twilio_ic_name[LANGUAGE_NONE][0]['value'], $room_name) == 0) {
-          $wrapper = entity_metadata_wrapper('field_collection_item', $item_load);
-          if(strcasecmp($item_load->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $data["device_id"]) != 0){
-            $wrapper->field_twilio_ic_device_id->set($data["device_id"]);
-          }
-          if(strcasecmp($item_load->field_twilio_ic_status[LANGUAGE_NONE][0]['value'], $data["status"]) != 0){
-            $wrapper->field_twilio_ic_status->set($data["status"]);
-          }
-          $wrapper->save();
-        }
-        break;
-      }
-    }
-    // #2
-
-    // #3
-    $query  = new EntityFieldQuery();
-    $entities = $query->entityCondition('entity_type', 'field_collection_item')
-                      ->entityCondition('bundle', 'field_twilio_outgoing_call')
-                      ->fieldCondition('field_twilio_room_name', 'value', $data['twilio_room_name'], '=')
-                      ->execute();
-
-    // $result['entities'] = serialize($entities);
-    if (!empty($entities['field_collection_item'])) {
-      // กรณีนี้อาจไม่เกิดขึ้นเลยก็ได้
-      $item_id = array_keys($entities['field_collection_item'])[0];
-
-      $data_item = field_collection_item_load($item_id);
-      if ($data_item) {
-
-        // เราต้องเช็กว่าค่านี้เป็น profile caller หรือไม่
-        $uid_caller = $data_item->hostEntity()->uid;
-
-        if (isset($data_item->field_twilio_video_members)) {
-          foreach ($data_item->field_twilio_video_members[LANGUAGE_NONE] as $key => $value) {
-            $item_load = field_collection_item_load($value['value']);
-            if(strcasecmp($item_load->field_twv_members_friend_id[LANGUAGE_NONE][0]['value'], $uid) == 0){
-              $wrapper = entity_metadata_wrapper('field_collection_item', $item_load);
-              if(strcasecmp($item_load->field_twilio_ic_device_id[LANGUAGE_NONE][0]['value'], $data["device_id"]) != 0){
-                $wrapper->field_twilio_ic_device_id->set($data["device_id"]);
-              }
-              if(strcasecmp($item_load->field_twv_members_status[LANGUAGE_NONE][0]['value'], $data["status"]) != 0){
-                $wrapper->field_twv_members_status->set($data["status"]);
-              }
-              $wrapper->save();
-
-
-              // udpate firebase caller members
-              $valus_update = array(
-                  "device_id"  => $data["device_id"],
-                  "status"     => $data["status"]
-              );
-              $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $uid_caller . "/outgoing_call/" . $item_id . "/members/" . $value['value'], $valus_update);
-              break;
-            }
-          }
-        }
-
-        // $valus_update = array(
-        //           "status"     => "room-ended"
-        //       );
-        // if (strcasecmp($data_item->field_twilio_room_type[LANGUAGE_NONE][0]['value'], "private") == 0) {
-        //   $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $uid_caller . "/outgoing_call/" . $item_id , $valus_update);
-        // }
-      }
-    }
-    // #3
-  }
-
-  $result['result'] = TRUE;
-  // $result['param']  = $param;
-  return  $result;
 }
 
 
