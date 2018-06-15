@@ -62,6 +62,8 @@ var PATH_UPDATE_MY_APPLICATIONS 		= '/update_my_applications';
 var PATH_UPDATE_MY_APPLICATIONS_FOLLOW 	= '/update_my_applications_follow';
 // var PATH_DELETE_MY_APPLICATION_FOLLOW 	= '/delete_my_application_follow';
 
+var PATH_UPDATE_CHAT_GROUP   			 = '/update_chat_group';
+
 
 var PATH_UPDATE_MY_APPLICATION_POST_LIKE = '/update_my_application_post_like';
 // var PATH_DELETE_MY_APPLICATION_POST_LIKE = '/delete_my_application_post_like';
@@ -598,6 +600,45 @@ exports.iDNA_Group_Chat_Delete = functions.database.ref(PATH_ROOT_IDNA + '/'+ PA
 	});
 });
 */
+
+exports.iDNA_Update_Chat_Group = functions.database.ref(PATH_ROOT_IDNA +'/'+ PATH_CHAT_GROUP + '/{chat_group_id}/').onWrite(event => {
+
+	// ต้องเช็กด้วยว่าเป้นการลบ ข้อมูลหรือไม่ ถ้าใช่ให้ return 
+	if (!event.data.exists()) {
+		return;
+	}
+
+	const crnt = event.data.current;
+    const prev = event.data.previous;
+
+    if (crnt.val() && !prev.val()) {
+		// console.log("add");
+    }else{
+    	// console.log("edit & update");
+
+    	var options = {
+		  uri: API_URL_IDNA + END_POINT_IDNA + PATH_UPDATE_CHAT_GROUP,
+		  method: 'POST',
+		  headers: headers,
+		  json: {
+		  	"chat_group_id" : event.params.chat_group_id,
+		  	"data" 			: crnt.val(),
+		  }
+		};
+
+		request(options, function (error, response, body) {
+			if (error == null){			
+				if (body.result) {
+					console.log(body);
+				}else{
+					console.log(body);
+				}
+			}
+			return true;
+		});
+    }
+	return true;
+});
 
 exports.iDNA_Chat_Group_Delete = functions.database.ref(PATH_ROOT_IDNA +'/'+ PATH_CHAT_GROUP + '/{chat_group_id}/').onDelete(event => {
 
@@ -1245,6 +1286,8 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 
 		// console.log("outgoing_call flag" + flag );
 
+		return true;
+		/*
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
@@ -1271,6 +1314,7 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 			}
 		}
 		return false
+		*/
 	}
 });
 
@@ -1314,6 +1358,9 @@ exports.incoming_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 		โดยเงือนว่า previous field device_id =="" && current field device_id != "" แค่นี้น่าจะได้
 		*/
 
+		return true;
+
+		/*
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
@@ -1325,6 +1372,7 @@ exports.incoming_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 		}
 
 		return true;
+		*/
 	}
 });
 

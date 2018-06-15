@@ -108,7 +108,7 @@ function idna_init(){
   // define("IS_DEBUG", 1);
   
   global $debug;
-  $debug = 1;
+  $debug = 0;
 
   /*
 if ($debug) {
@@ -4088,34 +4088,36 @@ function ___twilio_participant_disconnected($request){
 
 
           $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $pc_data_item->hostEntity()->uid .'/outgoing_call/'. $pc_data_item_uuid . '/members/' . $members_v['value'], array('status_callback'=>$status_callback));
-        }
 
-        switch ($item_member_load_type) {
-          case 'participant':{
-            // กรณ๊เป็นสมาชิกเราต้องไป update field_twilio_incoming_call ด้วย
-            $incoming_call_query    = new EntityFieldQuery();
-            $incoming_call_entities = $incoming_call_query->entityCondition('entity_type', 'field_collection_item')
-                          ->entityCondition('bundle', 'field_twilio_incoming_call')
-                          ->fieldCondition('field_twilio_ic_name', 'value', $room_name, '=')
-                          ->fieldCondition('field_twilio_room_uuid', 'value', $pc_data_item_uuid, '=')
-                          ->execute();
 
-            if (!empty($incoming_call_entities['field_collection_item'])) {
-              $incoming_call_item_id   = array_keys($incoming_call_entities['field_collection_item'])[0];
-              $incoming_call_data      = field_collection_item_load($incoming_call_item_id);
 
-              $incoming_call_wrapper = entity_metadata_wrapper('field_collection_item', $incoming_call_data);
-              $incoming_call_wrapper->field_twilio_room_statuscallback->set($status_callback);
-              $incoming_call_wrapper->save();
+          switch ($item_member_load_type) {
+            case 'participant':{
+              // กรณ๊เป็นสมาชิกเราต้องไป update field_twilio_incoming_call ด้วย
+              $incoming_call_query    = new EntityFieldQuery();
+              $incoming_call_entities = $incoming_call_query->entityCondition('entity_type', 'field_collection_item')
+                            ->entityCondition('bundle', 'field_twilio_incoming_call')
+                            ->fieldCondition('field_twilio_ic_name', 'value', $room_name, '=')
+                            ->fieldCondition('field_twilio_room_uuid', 'value', $pc_data_item_uuid, '=')
+                            ->execute();
 
-              $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $incoming_call_data->hostEntity()->uid .'/incoming_call/'. $pc_data_item_uuid, array('status_callback'=>$status_callback));
+              if (!empty($incoming_call_entities['field_collection_item'])) {
+                $incoming_call_item_id   = array_keys($incoming_call_entities['field_collection_item'])[0];
+                $incoming_call_data      = field_collection_item_load($incoming_call_item_id);
+
+                $incoming_call_wrapper = entity_metadata_wrapper('field_collection_item', $incoming_call_data);
+                $incoming_call_wrapper->field_twilio_room_statuscallback->set($status_callback);
+                $incoming_call_wrapper->save();
+
+                $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $incoming_call_data->hostEntity()->uid .'/incoming_call/'. $pc_data_item_uuid, array('status_callback'=>$status_callback));
+              }
             }
+              break;
+            
+            default:
+              # code...
+              break;
           }
-            break;
-          
-          default:
-            # code...
-            break;
         }
       }
     }
@@ -4123,12 +4125,17 @@ function ___twilio_participant_disconnected($request){
 }
 
 function ___twilio_completed($request){
-  watchdog(TAG, '___twilio_completed %request', array('%request'=>$request), WATCHDOG_INFO);
+  watchdog(TAG, 'completed %request', array('%request'=>serialize($request)), WATCHDOG_INFO);
+
   global $firebase;
 
-  $room_name = $request['RoomName'];
-  $RoomSid  = $request['RoomSid'];
+  // $request = $_REQUEST;
 
+  $room_name    = $request['RoomName'];
+  $room_sid     = $request['RoomSid'];
+  $room_status  = $request['RoomStatus'];
+
+  // ------------ outgoing_call
   $query    = new EntityFieldQuery();
   $entities = $query->entityCondition('entity_type', 'field_collection_item')
                 ->entityCondition('bundle', 'field_twilio_outgoing_call')
@@ -4140,15 +4147,44 @@ function ___twilio_completed($request){
     $data_item = field_collection_item_load($item_id);
 
     $data_item_wrapper = entity_metadata_wrapper('field_collection_item', $data_item);
-    // $data_item_wrapper->field_twilio_room_status->set($RoomSid);
-    // $wrapper->field_twilio_room_status->set($_REQUEST['RoomStatus']);
-    // $wrapper->field_twilio_room_statuscallback->set($_REQUEST['StatusCallbackEvent']);
-    // $wrapper->save();
+    $data_item_wrapper->field_twilio_room_status->set($room_status);
+    $data_item_wrapper->save();
 
     // $statuscallback = $data_item->field_twilio_room_statuscallback[LANGUAGE_NONE][0]['value'];
 
     // watchdog(TAG, 'completed : %item_id', array('%item_id'=> ''), WATCHDOG_INFO);
+
+    $data_item_uuid = $data_item->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
+
+    $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $data_item->hostEntity()->uid .'/outgoing_call/'. $data_item_uuid . '/', array('room_status'=>$room_status));
+
+    // $path = FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $data_item->hostEntity()->uid .'/outgoing_call/'. $data_item_uuid . '/';
+
+    // watchdog(TAG, 'completed -- %path - %room_status', array('%path'=>$path, '%room_status'=>$room_status), WATCHDOG_INFO);
   }
+  // ------------ outgoing_call
+
+  // ------------ incoming_call
+  $incoming_call_query    = new EntityFieldQuery();
+  $incoming_call_entities = $incoming_call_query->entityCondition('entity_type', 'field_collection_item')
+                            ->entityCondition('bundle', 'field_twilio_incoming_call')
+                            ->fieldCondition('field_twilio_ic_name', 'value', $room_name, '=')
+                            ->execute();
+
+  if (!empty($incoming_call_entities['field_collection_item'])) {
+    $incoming_call_item_id   = array_keys($incoming_call_entities['field_collection_item'])[0];
+    $incoming_call_data      = field_collection_item_load($incoming_call_item_id);
+
+    $incoming_call_data_uuid = $incoming_call_data->field_twilio_room_uuid[LANGUAGE_NONE][0]['value'];
+
+    $incoming_call_wrapper = entity_metadata_wrapper('field_collection_item', $incoming_call_data);
+    $incoming_call_wrapper->field_twilio_ic_status->set($room_status);
+    $incoming_call_wrapper->save();
+
+    $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_LOGIN_PATH . $incoming_call_data->hostEntity()->uid .'/incoming_call/'. $incoming_call_data_uuid, array('room_status'=>$room_status));
+  }
+  // ------------ incoming_call
+
 }
 
 
@@ -4523,6 +4559,7 @@ function hook_group_rooms(){
       break;
 
     case 'completed':{
+      // watchdog(TAG, 'completed %request', array('%request'=>serialize($_REQUEST)), WATCHDOG_INFO);
       background_process_start('___twilio_completed', $_REQUEST);
     }// end-case
       break;
