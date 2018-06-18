@@ -51,10 +51,9 @@ function test($myvar1){
   return 'test+';
 }
 
-// use Symfony\Component\Process\Process;
-// use Symfony\Component\Process\Exception\ProcessFailedException;
-
 function idna_init(){
+
+  
 
   // $contents = file_get_contents('ls -l');
   // echo "<pre>";
@@ -66,7 +65,8 @@ function idna_init(){
   // $process = new Process('pwd');
   // dpm($process->start());
 
-  
+
+ 
   //------------------
   /*
   $process = new Symfony\Component\Process\Process('python /home/somkid/fb-id.py');
@@ -84,7 +84,14 @@ function idna_init(){
   //------------------
 
   // --------- shell_exec ----------
-  echo shell_exec("python /home/somkid/fb-id.py 'CoCohSmile' ");
+  /*
+  $output =  shell_exec("python /home/somkid/fb-id.py 'CoCohSmile' 2>&1");
+  dpm($output);
+
+  // เราจะได้ ค่า $output = ['xxxx'] โดยเราจะใช้คำสั่ง preg_match_all เพือดึง 'xxxx' ออกมา
+  preg_match_all('/".*?"|\'.*?\'/', $output, $matches);
+  print_r($matches[0][0]);
+  */
   // --------- shell_exec ----------
   
 
@@ -752,6 +759,8 @@ function idna_mail($key, &$message, $params) {
     'langcode' => LANGUAGE_NONE/*$message['language']->language*/,
   );
 
+  watchdog(TAG, 'idna_mail > key : %key', array('%key'=> $key), WATCHDOG_INFO);
+
   switch ($key) {
     // Send a simple message from the contact form.
     case 'contact_message':{
@@ -766,6 +775,8 @@ function idna_mail($key, &$message, $params) {
       // as the body will later be transformed from HTML to text, meaning
       // that a normal use of '<' will result in truncation of the message.
       $message['body'][] = check_plain($params['message']);
+
+      watchdog(TAG, 'idna_mail > contact_message : %message', array('%message'=> serialize($message)), WATCHDOG_INFO);
     }
       break;
 
@@ -780,6 +791,10 @@ function idna_mail($key, &$message, $params) {
       // as the body will later be transformed from HTML to text, meaning
       // that a normal use of '<' will result in truncation of the message.
       $message['body'][] = check_plain($params['message']);
+
+
+
+      watchdog(TAG, 'idna_mail > user_forgot_password : %message', array('%message'=> serialize($message)), WATCHDOG_INFO);
 
     }
     break;
@@ -6073,11 +6088,17 @@ function login(){
 
   $name = $param['name'];
   $pass = $param['pass'];
+
+  if (IsEmail($name)) {
+    $name = db_query("SELECT name FROM {users} WHERE LOWER(mail) = LOWER(:name)", array(':name' => $name))->fetchField();
+  }
   
   module_load_include('inc', 'services', 'resources/user_resource');
 
   $result['result']         = TRUE;
-  $result['data']           = _user_resource_login($name, $pass);
+  // $result['data']           = _user_resource_login($name, $pass);
+
+  $result['data']     = onLoadDataUser(_user_resource_login($name, $pass));
 
   return $result;
 }
@@ -8680,10 +8701,14 @@ function idna_mail_send($key, $to, $name, $verify_key) {
       // while sending.
       $result = drupal_mail($module, $key, $to, $language, $params, $from, $send);
       if ($result['result'] == TRUE) {
-        drupal_set_message(t('Your message has been sent.'));
+        // drupal_set_message(t('Your message has been sent.'));
+        watchdog(TAG, 'idna_mail_send > contact_message: Your message has been sent : %to', array('%to'=> $to), WATCHDOG_INFO);
+
       }
       else {
-        drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+        // drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+        
+        watchdog(TAG, 'idna_mail_send > contact_message: There was a problem sending your message and it was not sent : %to', array('%to'=> $to), WATCHDOG_INFO);
       }
     }
       break;
@@ -8727,10 +8752,14 @@ function idna_mail_send($key, $to, $name, $verify_key) {
       // while sending.
       $result = drupal_mail($module, $key, $to, $language, $params, $from, $send);
       if ($result['result'] == TRUE) {
-        drupal_set_message(t('Your message has been sent.'));
+        // drupal_set_message(t('Your message has been sent.'));
+
+        watchdog(TAG, 'idna_mail_send > user_forgot_password: Your message has been sent : %to', array('%to'=> $to), WATCHDOG_INFO);
       }
       else {
-        drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+        // drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+
+        watchdog(TAG, 'idna_mail_send > contact_message: There was a problem sending your message and it was not sent : %to', array('%to'=> $to), WATCHDOG_INFO);
       }
 
     }
@@ -12396,40 +12425,80 @@ function get_app_detail(){
   return  $result;
 }
 
-function user_forgot_password()
-{
-  $result = array();
+/*
+ $result = array();
+  if (!check_header()) {
+    $result['result']   = FALSE;
+    $result['message']  = "check_header()";
+    return $result;
+  }
 
+  if (empty($_REQUEST['uid']) || empty($_REQUEST['item_id'])) {
+    $result['result'] = FALSE;
+    $result['message'] = "function force_logout : parameter";
+    return $result;
+  }
+
+  global $firebase;
+  $uid     = $_REQUEST['uid'];
+  $item_id = $_REQUEST['item_id']; 
+*/
+
+function user_forgot_password(){
+  $result = array();
+  if (!check_header()) {
+    $result['result']   = FALSE;
+    $result['message']  = "check_header()";
+    return $result;
+  }
+
+  if (empty($_REQUEST['mail'])) {
+    $result['result'] = FALSE;
+    $result['message'] = "function force_logout : parameter";
+    return $result;
+  }
+
+  $mail = $_REQUEST['mail'];
+
+  // load user object ขึ้นมาเพือแก้ไข mail
+  $load_user = user_load_by_mail($mail);
+  // update some user property
+
+  if ($load_user) {
+    # code...
+
+    /*
+    $verify_key = generateKey();
+    $load_user->pass = $verify_key;
+
+    // save existing user
+    user_save((object) array('uid' => $load_user->uid), (array) $load_user);
+
+    idna_mail_send("user_forgot_password", $mail, $load_user->name, $verify_key);
+
+
+    // idna_mail_send("user_forgot_password", $_POST['email'], $verify_key);
+    // $verify_key = generateKey();
+    
+
+    $result['result']   = TRUE;
+    // $result['message'] = "xxxx";
+    */
+
+    module_load_include('inc', 'services', 'resources/user_resource');
+
+    $result['result'] = TRUE;
+    $result['data']   = _user_resource_request_new_password($mail);
+  }else{
+    $result['result']   = FALSE;
+    $result['message'] = "Email not match " . $_POST['email'];
+  }
+
+  /*
   if (!empty($_POST['email'])) {
     # code...
     // #1
-    // load user object ขึ้นมาเพือแก้ไข mail
-    $load_user = user_load_by_mail($_POST['email']);
-    // update some user property
-
-    if ($load_user) {
-      # code...
-
-      $verify_key = generateKey();
-      $load_user->pass = $verify_key;
-
-      // save existing user
-      user_save((object) array('uid' => $load_user->uid), (array) $load_user);
-
-      idna_mail_send("user_forgot_password", $_POST['email'], $load_user->name, $verify_key);
-
-      /*
-      idna_mail_send("user_forgot_password", $_POST['email'], $verify_key);
-      $verify_key = generateKey();
-      */
-
-      $result['result']   = TRUE;
-      $result['message'] = "";
-
-    }else{
-      $result['result']   = FALSE;
-      $result['message'] = "Email not match " . $_POST['email'];
-    }
+    
 
     // // กรณี user ยังไม่ได้ตั้งชือใหม่ เราจะกำหนดให้ชือเท่ากัน email
     // if (strcasecmp($existingUser->name, $_POST['UDID'] . '@annmousu') != 0) { // 
@@ -12451,6 +12520,7 @@ function user_forgot_password()
   
   $result['function'] = "user_forgot_password";
   $result['$_POST']   = $_POST;
+  */
 
   return $result;
 }

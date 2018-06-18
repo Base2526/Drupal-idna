@@ -1,5 +1,9 @@
 #!/usr/bin/python
 
+#  
+# ex. echo shell_exec("python /home/somkid/fb-id.py 'CoCohSmile' 2>&1");
+#
+
 import requests
 import re
 import sys

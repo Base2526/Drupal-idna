@@ -401,5 +401,14 @@ function IsNullOrEmptyString($text){
     return (!isset($text) || trim($text)==='');
 }
 
+function IsEmail($email) {
+   if ( strpos($email, '@') !== false ) {
+      $split = explode('@', $email);
+      return (strpos($split['1'], '.') !== false ? true : false);
+   }
+   else {
+      return false;
+   }
+}
 
 ?>

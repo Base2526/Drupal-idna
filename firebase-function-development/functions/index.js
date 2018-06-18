@@ -43,8 +43,8 @@ var headers = {
 // Distribution
 // API_URL_IDNA            = @"http://128.199.210.45";
 
-// Development
-var API_URL_IDNA 						= 'http://188.166.208.70';
+// Development 
+var API_URL_IDNA 						= 'http://206.189.42.212';
 var END_POINT_IDNA 						= '/api';
 var PATH_ROOT_IDNA  					= 'idna';
 var PATH_USER_IDNA  					= 'user'; 
@@ -1286,8 +1286,8 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 
 		// console.log("outgoing_call flag" + flag );
 
-		return true;
-		/*
+		// return true;
+		
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
@@ -1309,12 +1309,12 @@ exports.outgoing_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 			for(key in members) {
 				var member = members[key];
 				if (member.type == 'participant') {
-					ref.child(PATH_USER_IDNA).child(member.friend_id).child('incoming_call').child(uuid).update({'status': 'rejected'});
+					ref.child(PATH_USER_IDNA).child(member.friend_id).child('incoming_call').child(uuid).update({'status': 'participant-disconnected'});
 				}
 			}
 		}
 		return false
-		*/
+	
 	}
 });
 
@@ -1358,21 +1358,21 @@ exports.incoming_call = functions.database.ref(PATH_ROOT_IDNA + '/'+ PATH_USER_I
 		โดยเงือนว่า previous field device_id =="" && current field device_id != "" แค่นี้น่าจะได้
 		*/
 
-		return true;
+		// return true;
 
-		/*
+		
 		var uid 		= event.params.uid;
 		var uuid        = event.params.uuid;
 		var data 		= event.data.current.val();
 
 		var ref = db.ref(PATH_ROOT_IDNA);
 
-		if (data.status == 'connected' || data.status == 'rejected') {
+		// if (data.status == 'connected' || data.status == 'rejected') {
 			ref.child(PATH_USER_IDNA).child(data.uid).child('outgoing_call').child(uuid).child('members').child(data.outgoing_call_member_item_id).update({'status': data.status});
-		}
+		// }
 
 		return true;
-		*/
+		
 	}
 });
 
