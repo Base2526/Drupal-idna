@@ -44,12 +44,6 @@ use Symfony\Component\Process\Exception\ProcessFailedException;
 $debug;
 $firebase;
 
-function test($myvar1){
-  // dpm('x' . $myvar1. ' || ' . $myvar2);
-  $item = field_collection_item_load('1117734');
-  watchdog(TAG, 'test === : %v', array('%v'=>serialize($item) ), WATCHDOG_INFO);
-  return 'test+';
-}
 
 function idna_init(){
 
@@ -150,7 +144,7 @@ function idna_init(){
   // define("IS_DEBUG", 1);
   
   global $debug;
-  $debug = 1;
+  $debug = 0;
 
   /*
 if ($debug) {
