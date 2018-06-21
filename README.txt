@@ -1,8 +1,8 @@
 
--- version 47
-1. เพิ่ม
+-- Version 47
+# 1. เพิ่ม hook_node_update เพราะว่าต้องการเช็ดกรณีเราแก้ไขเฉพาะ application idna เพื่อทีจะ update data firebase ได้ถูก
 
--- version 46
+-- Version 46
 1. แก้ปัญหาการ load รูปทั้งระบบ
 2. เพิ่มส่วน แสดงว่าไครเป้นคน post, comment ได้
 3. หลังบ้านจะมีการตั้งให้รัน auto ทุก 30 นาที กรณีมี my application ใหม่ๆ เข้ามา

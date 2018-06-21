@@ -1744,6 +1744,8 @@ function idna_node_update($node){
 
       $firebase->update(FIREBASE_DEFAULT_PATH . FIREBASE_CENTER_SLIDE . '/' . $node->nid, $items);
     }
+  } else if(strcmp($node->type, 'application') == 0){
+    watchdog(TAG, 'hook_node_update {application} = %nid - %data', array('%nid' => $node->nid, '%data'=>serialize($node) ), WATCHDOG_INFO);
   }
 }
 
